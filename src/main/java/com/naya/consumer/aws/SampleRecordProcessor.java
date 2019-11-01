@@ -1,6 +1,11 @@
 package com.naya.consumer.aws;
 
+import com.amazonaws.services.kinesis.model.DescribeStreamConsumerRequest;
+import com.amazonaws.services.kinesis.model.DescribeStreamRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.naya.consumer.aws.util.AvroUtils;
+import com.naya.consumer.aws.util.Employee;
+import com.sun.scenario.effect.impl.sw.sse.SSEBlend_SRC_OUTPeer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -34,19 +39,15 @@ public class SampleRecordProcessor implements ShardRecordProcessor {
      * @param initializationInput Provides information related to initialization.
      */
     public void initialize(InitializationInput initializationInput) {
-        shardId = initializationInput.shardId();
-        MDC.put(SHARD_ID_MDC_KEY, shardId);
-        try {
-            log.info("Initializing @ Sequence: {}", initializationInput.extendedSequenceNumber());
-        } finally {
-            MDC.remove(SHARD_ID_MDC_KEY);
-        }
+
     }
+
     private static byte[] getByteArrayFromByteBuffer(ByteBuffer byteBuffer) {
         byte[] bytesArray = new byte[byteBuffer.remaining()];
         byteBuffer.get(bytesArray, 0, bytesArray.length);
         return bytesArray;
     }
+
     /**
      * Handles record processing logic. The Amazon Kinesis Client Library will invoke this method to deliver
      * data records to the application. In this example we simply log our records.
@@ -55,17 +56,16 @@ public class SampleRecordProcessor implements ShardRecordProcessor {
      *                            related to them (e.g. checkpointing).
      */
     public void processRecords(ProcessRecordsInput processRecordsInput) {
+
         MDC.put(SHARD_ID_MDC_KEY, shardId);
+        System.out.println("IAAAAAA");
         try {
             log.info("Processing {} record(s)", processRecordsInput.records().size());
-            //processRecordsInput.records().forEach(r -> log.info("Processing record pk: {} -- Seq: {}", r.partitionKey(), r.sequenceNumber()));
+            //processRecordsInput.records().forEach(r -> log.info("Processing record pk: {} -- Seq: {}", r
+            // .partitionKey(), r.sequenceNumber()));
             processRecordsInput.records().forEach(record -> {
-                try {
-                    Person p = objectMapper.readValue(getByteArrayFromByteBuffer(record.data()),Person.class);
-                    log.info(p.toString());
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+                Employee emp = AvroUtils.readDataFromBytes(getByteArrayFromByteBuffer(record.data()));
+                log.info(emp.toString());
             });
         } catch (Throwable t) {
             log.error("Caught throwable while processing records. Aborting!!!!!.");
@@ -73,9 +73,11 @@ public class SampleRecordProcessor implements ShardRecordProcessor {
         } finally {
             MDC.remove(SHARD_ID_MDC_KEY);
         }
+
     }
 
-    /** Called when the lease tied to this record processor has been lost. Once the lease has been lost,
+    /**
+     * Called when the lease tied to this record processor has been lost. Once the lease has been lost,
      * the record processor can no longer checkpoint.
      *
      * @param leaseLostInput Provides access to functions and data related to the loss of the lease.

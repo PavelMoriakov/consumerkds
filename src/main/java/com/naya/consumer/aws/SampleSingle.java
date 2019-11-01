@@ -1,44 +1,32 @@
 package com.naya.consumer.aws;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.util.UUID;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+import com.amazonaws.services.kinesis.clientlibrary.lib.worker.KinesisClientLibConfiguration;
+import com.amazonaws.waiters.PollingStrategyContext;
 import org.apache.commons.lang3.ObjectUtils;
-import org.apache.commons.lang3.RandomStringUtils;
-import org.apache.commons.lang3.RandomUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
-
-import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient;
-import software.amazon.awssdk.services.kinesis.model.PutRecordRequest;
 import software.amazon.kinesis.common.ConfigsBuilder;
+import software.amazon.kinesis.common.InitialPositionInStream;
+import software.amazon.kinesis.common.InitialPositionInStreamExtended;
 import software.amazon.kinesis.common.KinesisClientUtil;
 import software.amazon.kinesis.coordinator.Scheduler;
-import software.amazon.kinesis.exceptions.InvalidStateException;
-import software.amazon.kinesis.exceptions.ShutdownException;
-import software.amazon.kinesis.lifecycle.events.InitializationInput;
-import software.amazon.kinesis.lifecycle.events.LeaseLostInput;
-import software.amazon.kinesis.lifecycle.events.ProcessRecordsInput;
-import software.amazon.kinesis.lifecycle.events.ShardEndedInput;
-import software.amazon.kinesis.lifecycle.events.ShutdownRequestedInput;
-
-import software.amazon.kinesis.processor.ShardRecordProcessor;
-import software.amazon.kinesis.processor.ShardRecordProcessorFactory;
+import software.amazon.kinesis.retrieval.DataFetchingStrategy;
 import software.amazon.kinesis.retrieval.polling.PollingConfig;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * This class will run a simple app that uses the KCL to read data and uses the AWS SDK to publish data.
@@ -54,7 +42,7 @@ public class SampleSingle {
      */
     public static void main(String... args) {
 
-        String streamName = "test";
+        String streamName = "testAvro3";
         String region = "us-east-2";
 
 
@@ -78,25 +66,17 @@ public class SampleSingle {
 
     private void run() {
 
-        /**
-         * Sends dummy data to Kinesis. Not relevant to consuming the data with the KCL
-         */
-        //ScheduledExecutorService producerExecutor = Executors.newSingleThreadScheduledExecutor();
-        //ScheduledFuture<?> producerFuture = producerExecutor.scheduleAtFixedRate(this::publishRecord, 10, 1, TimeUnit.SECONDS);
-
-        /**
-         * Sets up configuration for the KCL, including DynamoDB and CloudWatch dependencies. The final argument, a
-         * ShardRecordProcessorFactory, is where the logic for record processing lives, and is located in a private
-         * class below.
-         */
         DynamoDbAsyncClient dynamoClient = DynamoDbAsyncClient.builder().region(region).build();
         CloudWatchAsyncClient cloudWatchClient = CloudWatchAsyncClient.builder().region(region).build();
-        ConfigsBuilder configsBuilder = new ConfigsBuilder(streamName, streamName, kinesisClient, dynamoClient, cloudWatchClient, UUID.randomUUID().toString(), new SampleRecordProcessorFactory());
+        ConfigsBuilder configsBuilder = new ConfigsBuilder(streamName, "testConsumer2",kinesisClient, dynamoClient, cloudWatchClient, UUID.randomUUID().toString(), new SampleRecordProcessorFactory());
 
         /**
          * The Scheduler (also called Worker in earlier versions of the KCL) is the entry point to the KCL. This
          * instance is configured with defaults provided by the ConfigsBuilder.
          */
+        PollingConfig pollingConfig = new PollingConfig(streamName, kinesisClient);
+        //pollingConfig.recordsFetcherFactory().dataFetchingStrategy(DataFetchingStrategy.PREFETCH_CACHED);
+
         Scheduler scheduler = new Scheduler(
                 configsBuilder.checkpointConfig(),
                 configsBuilder.coordinatorConfig(),
@@ -104,7 +84,9 @@ public class SampleSingle {
                 configsBuilder.lifecycleConfig(),
                 configsBuilder.metricsConfig(),
                 configsBuilder.processorConfig(),
-                configsBuilder.retrievalConfig().retrievalSpecificConfig(new PollingConfig(streamName, kinesisClient))
+                configsBuilder.retrievalConfig().
+                        initialPositionInStreamExtended(InitialPositionInStreamExtended.
+                                newInitialPosition(InitialPositionInStream.TRIM_HORIZON))
         );
 
         /**
@@ -115,9 +97,6 @@ public class SampleSingle {
         schedulerThread.setDaemon(true);
         schedulerThread.start();
 
-        /**
-         * Allows termination of app by pressing Enter.
-         */
         System.out.println("Press enter to shutdown");
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         try {
@@ -130,8 +109,6 @@ public class SampleSingle {
          * Stops sending dummy data.
          */
         log.info("Cancelling producer and shutting down executor.");
-        //producerFuture.cancel(true);
-        //producerExecutor.shutdownNow();
 
         /**
          * Stops consuming data. Finishes processing the current batch of data already received from Kinesis
@@ -151,25 +128,13 @@ public class SampleSingle {
         log.info("Completed, shutting down now.");
     }
 
+
     /**
-     * Sends a single record of dummy data to Kinesis.
+     * Allows termination of app by pressing Enter.
      */
-    private void publishRecord() {
-        PutRecordRequest request = PutRecordRequest.builder()
-                .partitionKey(RandomStringUtils.randomAlphabetic(5, 20))
-                .streamName(streamName)
-                .data(SdkBytes.fromByteArray(RandomUtils.nextBytes(10)))
-                .build();
-        try {
-            kinesisClient.putRecord(request).get();
-        } catch (InterruptedException e) {
-            log.info("Interrupted, assuming shutdown.");
-        } catch (ExecutionException e) {
-            log.error("Exception while sending data to Kinesis. Will try again next cycle.", e);
-        }
+
     }
 
 
 
 
-}
