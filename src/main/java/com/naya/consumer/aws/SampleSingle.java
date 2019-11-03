@@ -1,8 +1,5 @@
 package com.naya.consumer.aws;
 
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
-import com.amazonaws.services.kinesis.clientlibrary.lib.worker.KinesisClientLibConfiguration;
-import com.amazonaws.waiters.PollingStrategyContext;
 import org.apache.commons.lang3.ObjectUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,17 +8,13 @@ import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.kinesis.KinesisAsyncClient;
 import software.amazon.kinesis.common.ConfigsBuilder;
-import software.amazon.kinesis.common.InitialPositionInStream;
-import software.amazon.kinesis.common.InitialPositionInStreamExtended;
 import software.amazon.kinesis.common.KinesisClientUtil;
 import software.amazon.kinesis.coordinator.Scheduler;
-import software.amazon.kinesis.retrieval.DataFetchingStrategy;
 import software.amazon.kinesis.retrieval.polling.PollingConfig;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -36,17 +29,14 @@ public class SampleSingle {
 
     private static final Logger log = LoggerFactory.getLogger(SampleSingle.class);
 
-    /**
-     * Invoke the main method with 2 args: the stream name and (optionally) the region.
-     * Verifies valid inputs and then starts running the app.
-     */
     public static void main(String... args) {
 
-        String streamName = "testAvro3";
+        String streamName = "test";
         String region = "us-east-2";
 
 
-        new SampleSingle(streamName, region).run();
+        SampleSingle sample = new SampleSingle(streamName, region);
+        sample.run();
     }
 
     private final String streamName;
@@ -68,7 +58,8 @@ public class SampleSingle {
 
         DynamoDbAsyncClient dynamoClient = DynamoDbAsyncClient.builder().region(region).build();
         CloudWatchAsyncClient cloudWatchClient = CloudWatchAsyncClient.builder().region(region).build();
-        ConfigsBuilder configsBuilder = new ConfigsBuilder(streamName, "testConsumer2",kinesisClient, dynamoClient, cloudWatchClient, UUID.randomUUID().toString(), new SampleRecordProcessorFactory());
+        ConfigsBuilder configsBuilder = new ConfigsBuilder(streamName, "testConsumer", kinesisClient,
+                dynamoClient, cloudWatchClient, UUID.randomUUID().toString(), new SampleRecordProcessorFactory());
 
         /**
          * The Scheduler (also called Worker in earlier versions of the KCL) is the entry point to the KCL. This
@@ -80,13 +71,15 @@ public class SampleSingle {
         Scheduler scheduler = new Scheduler(
                 configsBuilder.checkpointConfig(),
                 configsBuilder.coordinatorConfig(),
-                configsBuilder.leaseManagementConfig(),
+                configsBuilder.leaseManagementConfig()
+                        /*.initialPositionInStream(InitialPositionInStreamExtended.
+                                newInitialPosition(InitialPositionInStream.TRIM_HORIZON))*/,
                 configsBuilder.lifecycleConfig(),
                 configsBuilder.metricsConfig(),
                 configsBuilder.processorConfig(),
-                configsBuilder.retrievalConfig().
-                        initialPositionInStreamExtended(InitialPositionInStreamExtended.
-                                newInitialPosition(InitialPositionInStream.TRIM_HORIZON))
+                configsBuilder.retrievalConfig().retrievalSpecificConfig(pollingConfig)
+                        /*.initialPositionInStreamExtended(InitialPositionInStreamExtended.
+                                newInitialPosition(InitialPositionInStream.LATEST))*/
         );
 
         /**

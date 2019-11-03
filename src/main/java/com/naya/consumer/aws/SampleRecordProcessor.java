@@ -1,11 +1,8 @@
 package com.naya.consumer.aws;
 
-import com.amazonaws.services.kinesis.model.DescribeStreamConsumerRequest;
-import com.amazonaws.services.kinesis.model.DescribeStreamRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.naya.consumer.aws.util.AvroUtils;
 import com.naya.consumer.aws.util.Employee;
-import com.sun.scenario.effect.impl.sw.sse.SSEBlend_SRC_OUTPeer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -14,7 +11,6 @@ import software.amazon.kinesis.exceptions.ShutdownException;
 import software.amazon.kinesis.lifecycle.events.*;
 import software.amazon.kinesis.processor.ShardRecordProcessor;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 
 
